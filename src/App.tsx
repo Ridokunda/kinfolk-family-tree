@@ -263,7 +263,7 @@ export default function App() {
             <GitBranch size={23} />
           </span>
           <span>
-            kinfolk<small>EVERY BRANCH HAS A STORY</small>
+            Generations<small>EVERY BRANCH HAS A STORY</small>
           </span>
         </a>
         <div className="tree-switcher">
@@ -327,7 +327,7 @@ export default function App() {
           <small>Your family data stays with you.</small>
           <button className="text-button" onClick={install}>
             <Download size={14} />
-            Install Kinfolk
+            Install Generations
             <ArrowUpRight size={13} />
           </button>
         </div>
@@ -741,7 +741,7 @@ export default function App() {
               <div className="workspace-foot">
                 <Leaf size={13} />
                 Small details. Lasting connections.
-                <span>Kinfolk · Your private family archive</span>
+                <span>Generations · Your private family archive</span>
               </div>
             </>
           )}
@@ -835,7 +835,10 @@ export default function App() {
         </Modal>
       )}
       {installHelp && (
-        <Modal title="Install Kinfolk" onClose={() => setInstallHelp(false)}>
+        <Modal
+          title="Install Generations"
+          onClose={() => setInstallHelp(false)}
+        >
           <div className="form">
             <p>
               In Chrome or Edge, look for the install icon in the address bar or

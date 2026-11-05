@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: "prompt",
       includeAssets: ["icon.svg"],
       manifest: {
-        name: "Kinfolk · Family Tree",
-        short_name: "Kinfolk",
+        name: "Generations · Family Tree",
+        short_name: "Generations",
         description: "Your family stories, together. Private on this device.",
         theme_color: "#264e43",
         background_color: "#f7f7f2",

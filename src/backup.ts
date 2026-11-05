@@ -191,7 +191,7 @@ export async function makeBackup(
     }),
   );
   files["README.txt"] = strToU8(
-    "Kinfolk family backup, format 1. Restore from the Backups screen in Kinfolk. This archive includes family.json and every photograph and attachment. Install/open the app on another computer before going offline. Keep at least two independent copies. A ZIP is not encrypted.",
+    "Generations family backup, format 1. Restore from the Backups screen in Generations. This archive includes family.json and every photograph and attachment. Install/open the app on another computer before going offline. Keep at least two independent copies. A ZIP is not encrypted.",
   );
   let bytes = zipSync(files, { level: 6 });
   if (password) bytes = await encrypt(bytes, password);
@@ -255,7 +255,7 @@ export async function readBackup(
     );
   }
   if (!files["manifest.json"] || !files["family.json"])
-    throw new Error("Not a Kinfolk backup: required files are missing.");
+    throw new Error("Not a Generations backup: required files are missing.");
   let manifest, raw;
   try {
     manifest = manifestSchema.parse(

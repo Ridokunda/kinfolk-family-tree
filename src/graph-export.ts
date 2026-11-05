@@ -178,7 +178,7 @@ export async function renderTreePng(
   ctx.font = "10px Arial";
   ctx.fillStyle = "#87977a";
   ctx.fillText(
-    "Kinfolk · Family diagram. Keep a complete data backup separately.",
+    "Generations · Family diagram. Keep a complete data backup separately.",
     30,
     height - 18,
   );

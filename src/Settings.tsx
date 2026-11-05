@@ -190,7 +190,7 @@ export function Settings({
       </div>
       <section className="panel">
         <h2>About this release</h2>
-        <p>Kinfolk 1.0 · Local database version 2 · Backup format 1</p>
+        <p>Generations 1.0 · Local database version 2 · Backup format 1</p>
         <p className="muted">
           Up to 10,000 people, 50,000 relationships, and 100 MiB of uncompressed
           backup content. These are import safety limits, not a guarantee that

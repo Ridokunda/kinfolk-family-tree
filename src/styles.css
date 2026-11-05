@@ -123,8 +123,8 @@ small {
 }
 .brand > span:last-child {
   font-family: Georgia, serif;
-  font-size: 31px;
-  letter-spacing: -1.2px;
+  font-size: 25px;
+  letter-spacing: -0.8px;
   line-height: 1;
 }
 .brand small {
@@ -143,6 +143,7 @@ small {
   border-radius: 13px;
   width: 44px;
   height: 44px;
+  flex-shrink: 0;
 }
 .tree-switcher {
   border-bottom: 1px solid var(--line);
@@ -1669,6 +1670,16 @@ td {
   }
 }
 @media (max-width: 1200px) {
+  .brand {
+    gap: 10px;
+  }
+  .brand > span:last-child {
+    font-size: 22px;
+  }
+  .brand-mark {
+    width: 40px;
+    height: 40px;
+  }
   .sidebar {
     width: 205px;
     padding-left: 16px;

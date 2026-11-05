@@ -51,7 +51,7 @@ export function RestoreWelcome({
     <Modal title="Bring your family tree home" onClose={onClose}>
       <div className="form">
         <p className="muted">
-          Choose a Kinfolk backup from this computer or a USB drive. We will
+          Choose a Generations backup from this computer or a USB drive. We will
           check it before importing anything.
         </p>
         <label className="file-drop">

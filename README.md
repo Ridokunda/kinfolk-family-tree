@@ -1,4 +1,4 @@
-# Kinfolk · Family Tree
+# Generations · Family Tree
 
 A local-first family archive built with React, TypeScript, Vite, Dexie, React Flow, and Tailwind. Records stay in the browser. No backend, account, paid database, or synchronization service is required.
 

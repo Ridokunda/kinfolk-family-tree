@@ -1,6 +1,8 @@
-# Kinfolk backup format 1
+# Generations backup format 1
 
 The database schema and backup schema are independently versioned. Format 1 requires a strict supported-version match. Unknown future versions fail safely; future supported migrations must operate in staging before committing any records.
+
+The app was previously named Kinfolk. Existing database names, local settings keys, backup format identifiers, and encrypted-file signatures retain their original values so existing records and backups remain compatible with Generations.
 
 ## ZIP payload
 
