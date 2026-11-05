@@ -1,14 +1,355 @@
-import { useRef,useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { X,Pencil,Plus,MapPin,CalendarDays,Paperclip,Download,Trash2,Camera,Focus } from 'lucide-react';
-import { db,deletePerson,removeMedia,deleteRelation } from './db';
-import { attachFile } from './media';
-import { type Person,type Relation,nameOf,relativesOf,kindLabel,friendlyError } from './domain';
-import { Avatar,Busy,formatBytes } from './ui';
-import { downloadBlob } from './backup';
-export function Profile({person,people,relations,onClose,onEdit,onRelative,onSelect,onFocus,onEditRelation,notify}:{person:Person;people:Person[];relations:Relation[];onClose:()=>void;onEdit:()=>void;onRelative:()=>void;onSelect:(p:Person)=>void;onFocus:()=>void;onEditRelation:(r:Relation)=>void;notify:(s:string)=>void}){
- const assets=useLiveQuery(()=>db.media.where('personId').equals(person.id).toArray(),[person.id])||[];const photoInput=useRef<HTMLInputElement>(null),fileInput=useRef<HTMLInputElement>(null);const [busy,setBusy]=useState(false),[error,setError]=useState(''),[confirmDelete,setConfirmDelete]=useState(false),[removeId,setRemoveId]=useState('');
- async function upload(file:File|undefined,photo:boolean){if(!file)return;setBusy(true);setError('');try{await attachFile(person,file,photo);notify(photo?'Photograph saved on this device':'Attachment saved on this device');}catch(e){setError(friendlyError(e));}finally{setBusy(false);}}
- const connections=relations.filter(r=>r.fromId===person.id||r.toId===person.id);const relatives=relativesOf(person.id,people,relations);
- return <aside className="profile-panel" aria-label="Family member profile"><div className="profile-top"><span className="eyebrow">FAMILY MEMBER</span><button className="icon-button" aria-label="Close profile" onClick={onClose}><X size={18}/></button></div><div className="profile-identity"><Avatar person={person} size="large"/><button className="photo-button" aria-label="Change profile photograph" onClick={()=>photoInput.current?.click()} disabled={busy}><Camera size={14}/></button><h2>{nameOf(person)}</h2><span className={`status ${person.status}`}>{person.status==='unknown'?'Living status unknown':person.status}</span></div><div className="profile-actions"><button className="button secondary" onClick={onEdit}><Pencil size={15}/>Edit profile</button><button className="button secondary" onClick={onRelative}><Plus size={15}/>Relative</button><button className="icon-button" title="Focus in tree" aria-label="Focus in tree" onClick={onFocus}><Focus size={18}/></button></div><input type="file" ref={photoInput} hidden accept="image/jpeg,image/png,image/webp" onChange={e=>{upload(e.target.files?.[0],true);e.target.value='';}}/><input type="file" ref={fileInput} hidden accept="image/jpeg,image/png,image/webp,application/pdf,text/plain" onChange={e=>{upload(e.target.files?.[0],false);e.target.value='';}}/>{busy&&<Busy label="Saving file…"/>}{error&&<div className="notice error" role="alert">{error}</div>}<div className="profile-section facts"><div><CalendarDays size={16}/><span><small>Born</small>{person.birthDate?`${person.birthApprox?'Around ':''}${person.birthDate}`:'Not recorded'}</span></div>{person.status==='deceased'&&<div><CalendarDays size={16}/><span><small>Died</small>{person.deathDate?`${person.deathApprox?'Around ':''}${person.deathDate}`:'Not recorded'}</span></div>}<div><MapPin size={16}/><span><small>Birthplace</small>{person.birthplace||'Not recorded'}</span></div></div><section className="profile-section"><h3>Their story</h3><p className={person.biography?'preserve':'muted'}>{person.biography||'A life is more than a name. Add a memory, a milestone, or a story worth keeping.'}</p></section>{person.notes&&<section className="profile-section"><h3>Notes</h3><p className="preserve">{person.notes}</p></section>}<section className="profile-section"><h3>Family connections <span>{relatives.length}</span></h3><div className="relative-list">{relatives.length?relatives.map(({person:p,label})=><button key={p.id} onClick={()=>onSelect(p)}><Avatar person={p} size="small"/><span><strong>{nameOf(p)}</strong><small>{label}</small></span></button>):<p className="muted">Add a relationship to connect their story.</p>}</div></section><section className="profile-section"><h3>Recorded relationships</h3>{connections.map(r=><div className="connection" key={r.id}><button className="text-button" onClick={()=>onEditRelation(r)}>{kindLabel[r.kind]} · {nameOf(people.find(p=>p.id===(r.fromId===person.id?r.toId:r.fromId))!)}{r.endReason?` · ${r.endReason}`:''}</button>{removeId===r.id?<button className="text-button danger" onClick={async()=>{try{await deleteRelation(r);setRemoveId('');}catch(e){setError(friendlyError(e));}}}>Confirm unlink</button>:<button className="icon-button" aria-label="Remove relationship" onClick={()=>setRemoveId(r.id)}><X size={13}/></button>}</div>)}</section><section className="profile-section"><h3>Photos & documents <button className="text-button" onClick={()=>fileInput.current?.click()} disabled={busy}><Plus size={14}/>Add</button></h3><p className="small muted">JPG, PNG, WebP, PDF, or text · up to 20 MB each. Profile photos are resized; attach an original separately to preserve it.</p>{assets.map(a=><div className="attachment" key={a.id}><Paperclip size={16}/><span><strong>{a.name}</strong><small>{formatBytes(a.size)}{a.id===person.photoId?' · Profile photo':''}</small></span><button className="icon-button" aria-label={`Download ${a.name}`} onClick={()=>downloadBlob(a.blob,a.name)}><Download size={15}/></button>{removeId===a.id?<button className="text-button danger" onClick={async()=>{try{await removeMedia(a);setRemoveId('');}catch(e){setError(friendlyError(e));}}}>Remove</button>:<button className="icon-button" aria-label={`Remove ${a.name}`} onClick={()=>setRemoveId(a.id)}><Trash2 size={14}/></button>}</div>)}</section><section className="profile-section">{confirmDelete?<div className="notice warning"><p>Delete {nameOf(person)}, their {connections.length} relationships, and {assets.length} files? Other family members remain.</p><button className="button danger-button" onClick={async()=>{try{await deletePerson(person);notify('Family member deleted');onClose();}catch(e){setError(friendlyError(e));}}}>Delete permanently</button><button className="text-button" onClick={()=>setConfirmDelete(false)}>Cancel</button></div>:<button className="text-button danger" onClick={()=>setConfirmDelete(true)}><Trash2 size={14}/>Delete family member</button>}</section></aside>;
+import { useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import {
+  X,
+  Pencil,
+  Plus,
+  MapPin,
+  CalendarDays,
+  Paperclip,
+  Download,
+  Trash2,
+  Camera,
+  Focus,
+} from "lucide-react";
+import { db, deletePerson, removeMedia, deleteRelation } from "./db";
+import { attachFile } from "./media";
+import {
+  type Person,
+  type Relation,
+  nameOf,
+  relativesOf,
+  kindLabel,
+  friendlyError,
+} from "./domain";
+import { Avatar, Busy, formatBytes } from "./ui";
+import { downloadBlob } from "./backup";
+export function Profile({
+  person,
+  people,
+  relations,
+  onClose,
+  onEdit,
+  onRelative,
+  onSelect,
+  onFocus,
+  onEditRelation,
+  notify,
+}: {
+  person: Person;
+  people: Person[];
+  relations: Relation[];
+  onClose: () => void;
+  onEdit: () => void;
+  onRelative: () => void;
+  onSelect: (p: Person) => void;
+  onFocus: () => void;
+  onEditRelation: (r: Relation) => void;
+  notify: (s: string) => void;
+}) {
+  const assets =
+    useLiveQuery(
+      () => db.media.where("personId").equals(person.id).toArray(),
+      [person.id],
+    ) || [];
+  const photoInput = useRef<HTMLInputElement>(null),
+    fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [confirmDelete, setConfirmDelete] = useState(false),
+    [removeId, setRemoveId] = useState("");
+  async function upload(file: File | undefined, photo: boolean) {
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      await attachFile(person, file, photo);
+      notify(
+        photo
+          ? "Photograph saved on this device"
+          : "Attachment saved on this device",
+      );
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const connections = relations.filter(
+    (r) => r.fromId === person.id || r.toId === person.id,
+  );
+  const relatives = relativesOf(person.id, people, relations);
+  return (
+    <aside className="profile-panel" aria-label="Family member profile">
+      <div className="profile-top">
+        <span className="eyebrow">FAMILY MEMBER</span>
+        <button
+          className="icon-button"
+          aria-label="Close profile"
+          onClick={onClose}
+        >
+          <X size={18} />
+        </button>
+      </div>
+      <div className="profile-identity">
+        <Avatar person={person} size="large" />
+        <button
+          className="photo-button"
+          aria-label="Change profile photograph"
+          onClick={() => photoInput.current?.click()}
+          disabled={busy}
+        >
+          <Camera size={14} />
+        </button>
+        <h2>{nameOf(person)}</h2>
+        <span className={`status ${person.status}`}>
+          {person.status === "unknown"
+            ? "Living status unknown"
+            : person.status}
+        </span>
+      </div>
+      <div className="profile-actions">
+        <button className="button secondary" onClick={onEdit}>
+          <Pencil size={15} />
+          Edit profile
+        </button>
+        <button className="button secondary" onClick={onRelative}>
+          <Plus size={15} />
+          Relative
+        </button>
+        <button
+          className="icon-button"
+          title="Focus in tree"
+          aria-label="Focus in tree"
+          onClick={onFocus}
+        >
+          <Focus size={18} />
+        </button>
+      </div>
+      <input
+        type="file"
+        ref={photoInput}
+        hidden
+        accept="image/jpeg,image/png,image/webp"
+        onChange={(e) => {
+          upload(e.target.files?.[0], true);
+          e.target.value = "";
+        }}
+      />
+      <input
+        type="file"
+        ref={fileInput}
+        hidden
+        accept="image/jpeg,image/png,image/webp,application/pdf,text/plain"
+        onChange={(e) => {
+          upload(e.target.files?.[0], false);
+          e.target.value = "";
+        }}
+      />
+      {busy && <Busy label="Saving file…" />}
+      {error && (
+        <div className="notice error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="profile-section facts">
+        <div>
+          <CalendarDays size={16} />
+          <span>
+            <small>Born</small>
+            {person.birthDate
+              ? `${person.birthApprox ? "Around " : ""}${person.birthDate}`
+              : "Not recorded"}
+          </span>
+        </div>
+        {person.status === "deceased" && (
+          <div>
+            <CalendarDays size={16} />
+            <span>
+              <small>Died</small>
+              {person.deathDate
+                ? `${person.deathApprox ? "Around " : ""}${person.deathDate}`
+                : "Not recorded"}
+            </span>
+          </div>
+        )}
+        <div>
+          <MapPin size={16} />
+          <span>
+            <small>Birthplace</small>
+            {person.birthplace || "Not recorded"}
+          </span>
+        </div>
+      </div>
+      <section className="profile-section">
+        <h3>Their story</h3>
+        <p className={person.biography ? "preserve" : "muted"}>
+          {person.biography ||
+            "A life is more than a name. Add a memory, a milestone, or a story worth keeping."}
+        </p>
+      </section>
+      {person.notes && (
+        <section className="profile-section">
+          <h3>Notes</h3>
+          <p className="preserve">{person.notes}</p>
+        </section>
+      )}
+      <section className="profile-section">
+        <h3>
+          Family connections <span>{relatives.length}</span>
+        </h3>
+        <div className="relative-list">
+          {relatives.length ? (
+            relatives.map(({ person: p, label }) => (
+              <button key={p.id} onClick={() => onSelect(p)}>
+                <Avatar person={p} size="small" />
+                <span>
+                  <strong>{nameOf(p)}</strong>
+                  <small>{label}</small>
+                </span>
+              </button>
+            ))
+          ) : (
+            <p className="muted">Add a relationship to connect their story.</p>
+          )}
+        </div>
+      </section>
+      <section className="profile-section">
+        <h3>Recorded relationships</h3>
+        {connections.map((r) => (
+          <div className="connection" key={r.id}>
+            <button className="text-button" onClick={() => onEditRelation(r)}>
+              {kindLabel[r.kind]} ·{" "}
+              {nameOf(
+                people.find(
+                  (p) => p.id === (r.fromId === person.id ? r.toId : r.fromId),
+                )!,
+              )}
+              {r.endReason ? ` · ${r.endReason}` : ""}
+            </button>
+            {removeId === r.id ? (
+              <button
+                className="text-button danger"
+                onClick={async () => {
+                  try {
+                    await deleteRelation(r);
+                    setRemoveId("");
+                  } catch (e) {
+                    setError(friendlyError(e));
+                  }
+                }}
+              >
+                Confirm unlink
+              </button>
+            ) : (
+              <button
+                className="icon-button"
+                aria-label="Remove relationship"
+                onClick={() => setRemoveId(r.id)}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        ))}
+      </section>
+      <section className="profile-section">
+        <h3>
+          Photos & documents{" "}
+          <button
+            className="text-button"
+            onClick={() => fileInput.current?.click()}
+            disabled={busy}
+          >
+            <Plus size={14} />
+            Add
+          </button>
+        </h3>
+        <p className="small muted">
+          JPG, PNG, WebP, PDF, or text · up to 20 MB each. Profile photos are
+          resized; attach an original separately to preserve it.
+        </p>
+        {assets.map((a) => (
+          <div className="attachment" key={a.id}>
+            <Paperclip size={16} />
+            <span>
+              <strong>{a.name}</strong>
+              <small>
+                {formatBytes(a.size)}
+                {a.id === person.photoId ? " · Profile photo" : ""}
+              </small>
+            </span>
+            <button
+              className="icon-button"
+              aria-label={`Download ${a.name}`}
+              onClick={() => downloadBlob(a.blob, a.name)}
+            >
+              <Download size={15} />
+            </button>
+            {removeId === a.id ? (
+              <button
+                className="text-button danger"
+                onClick={async () => {
+                  try {
+                    await removeMedia(a);
+                    setRemoveId("");
+                  } catch (e) {
+                    setError(friendlyError(e));
+                  }
+                }}
+              >
+                Remove
+              </button>
+            ) : (
+              <button
+                className="icon-button"
+                aria-label={`Remove ${a.name}`}
+                onClick={() => setRemoveId(a.id)}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        ))}
+      </section>
+      <section className="profile-section">
+        {confirmDelete ? (
+          <div className="notice warning">
+            <p>
+              Delete {nameOf(person)}, their {connections.length} relationships,
+              and {assets.length} files? Other family members remain.
+            </p>
+            <button
+              className="button danger-button"
+              onClick={async () => {
+                try {
+                  await deletePerson(person);
+                  notify("Family member deleted");
+                  onClose();
+                } catch (e) {
+                  setError(friendlyError(e));
+                }
+              }}
+            >
+              Delete permanently
+            </button>
+            <button
+              className="text-button"
+              onClick={() => setConfirmDelete(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            className="text-button danger"
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2 size={14} />
+            Delete family member
+          </button>
+        )}
+      </section>
+    </aside>
+  );
 }

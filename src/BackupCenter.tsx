@@ -1,23 +1,585 @@
-import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { Archive,Download,FolderOpen,LockKeyhole,ShieldCheck,Upload,Check,HardDrive,ArrowRight } from 'lucide-react';
-import { db,snapshotTree,restoreBundle } from './db';
-import { type Tree,uid,now,friendlyError } from './domain';
-import { type ParsedBackup,type PreparedBackup,bytesBuffer,downloadBlob,sha256 } from './backup';
-import { prepareBackup,inspectBackup } from './backup-client';
-import { Busy,formatTime,formatBytes } from './ui';
-type FileHandle={createWritable:()=>Promise<{write:(data:Blob)=>Promise<void>;close:()=>Promise<void>;abort:()=>Promise<void>}>};
-type PickerWindow=Window & {showSaveFilePicker?:(options:unknown)=>Promise<FileHandle>};
-export function BackupCenter({tree,onRestored,notify}:{tree:Tree;onRestored:(tree:Tree)=>void;notify:(message:string)=>void}){
- const history=useLiveQuery(()=>db.backups.where('treeId').equals(tree.id).reverse().sortBy('createdAt'),[tree.id])||[];
- const [encrypted,setEncrypted]=useState(true),[password,setPassword]=useState(''),[confirmPassword,setConfirmPassword]=useState(''),[prepared,setPrepared]=useState<PreparedBackup|null>(null),[busy,setBusy]=useState(''),[error,setError]=useState(''),[status,setStatus]=useState('');
- const [file,setFile]=useState<File|null>(null),[restorePassword,setRestorePassword]=useState(''),[preview,setPreview]=useState<ParsedBackup|null>(null),[fileHash,setFileHash]=useState(''),[mode,setMode]=useState('separate'),[target,setTarget]=useState({id:tree.id,revision:tree.revision}),[confirmName,setConfirmName]=useState(''),[usb,setUsb]=useState(false);
- const latestVerified=history.find(b=>b.outcome==='verified'),latestSaved=history.find(b=>b.outcome==='written'||b.outcome==='verified');
- async function generate(){setBusy('Preparing and checking your backup…');setError('');setStatus('');setPrepared(null);try{if(encrypted&&password!==confirmPassword)throw new Error('The two passphrases do not match.');if(encrypted&&password.length<12)throw new Error('Use a passphrase with at least 12 characters.');const result=await prepareBackup(await snapshotTree(tree.id),encrypted?password:'');setPrepared(result);setPassword('');setConfirmPassword('');setStatus('Backup generated and validated. Choose where to save it below.');}catch(e){setError(friendlyError(e));}finally{setBusy('');}}
- async function logSave(outcome:'download'|'written'){if(!prepared)return;await db.backups.add({id:uid(),treeId:tree.id,backupId:prepared.backupId,revision:prepared.revision,createdAt:prepared.createdAt,filename:prepared.filename,outcome,usbConfirmed:false,fileHash:await sha256(prepared.bytes)});}
- async function save(direct:boolean){if(!prepared)return;setError('');try{const blob=new Blob([bytesBuffer(prepared.bytes)],{type:prepared.filename.endsWith('.zip')?'application/zip':'application/octet-stream'});if(direct&&(window as PickerWindow).showSaveFilePicker){const handle=await (window as PickerWindow).showSaveFilePicker!({suggestedName:prepared.filename});setBusy('Writing the selected file…');const writable=await handle.createWritable();try{await writable.write(blob);await writable.close();}catch(e){try{await writable.abort();}catch{}throw e;}await logSave('written');setStatus('File write completed. Reopen the saved file below to check its integrity.');}else{downloadBlob(blob,prepared.filename);await logSave('download');setStatus('Download requested. Check that it finished, copy it to your USB, then reopen that file below.');}}catch(e){if(e instanceof Error&&e.name==='AbortError')setStatus('Saving cancelled. No successful save was recorded.');else setError(friendlyError(e));}finally{setBusy('');}}
- async function inspect(){if(!file)return;setBusy('Opening and validating every record and attachment…');setError('');setPreview(null);try{if(file.size>104*1024*1024)throw new Error('This backup is too large (maximum 104 MiB file size).');const bytes=new Uint8Array(await file.arrayBuffer());const parsed=await inspectBackup(bytes,restorePassword);setFileHash(await sha256(bytes));setPreview(parsed);setRestorePassword('');setTarget({id:tree.id,revision:tree.revision});setMode('separate');setConfirmName('');setUsb(false);}catch(e){setError(friendlyError(e));}finally{setBusy('');}}
- async function verify(){if(!preview)return;setBusy('Recording verification…');setError('');try{const records=await db.backups.where('treeId').equals(tree.id).filter(b=>b.backupId===preview.backupId).toArray();const matching=records.filter(b=>b.fileHash===fileHash);if(!matching.length){setStatus('This file passed integrity checks. It was not previously exported from this tree on this device, so its backup history was not changed.');return;}await db.transaction('rw',db.backups,async()=>{for(const b of matching)await db.backups.update(b.id,{outcome:'verified',verifiedAt:now(),usbConfirmed:usb});});setStatus(usb?'Saved file verified; USB location confirmed by you.':'Saved file verified. External storage location has not been confirmed.');notify('Backup integrity verified');}catch(e){setError(friendlyError(e));}finally{setBusy('');}}
- async function restore(){if(!preview)return;setError('');setBusy('Restoring family records…');try{if(mode==='replace'&&confirmName!==tree.name)throw new Error('Type the current tree name exactly to confirm replacement.');const restored=await restoreBundle(preview,mode==='replace'?target:undefined);onRestored(restored);setPreview(null);setPrepared(null);notify(`Restored ${preview.data.people.length} people and ${preview.data.media.length} files`);}catch(e){setError(friendlyError(e));}finally{setBusy('');}}
- return <div className="backup-page"><div className="page-intro"><div><span className="eyebrow">KEEP YOUR STORIES SAFE</span><h1>A little care. A lasting legacy.</h1><p>Your browser holds the working copy. A backup gives your family another home.</p></div><span className="intro-icon"><Archive size={32}/></span></div><div className="backup-stats"><div><ShieldCheck size={20}/><span><small>Last verified file</small><strong>{formatTime(latestVerified?.verifiedAt)}</strong></span></div><div><HardDrive size={20}/><span><small>Last completed write or verification</small><strong>{formatTime(latestSaved?.createdAt)}</strong></span></div><div><Archive size={20}/><span><small>Changes since verified backup</small><strong>{latestVerified?Math.max(0,tree.revision-latestVerified.revision):'No verified backup yet'}</strong></span></div></div><div className="notice"><ShieldCheck size={18}/><span>Keep two copies on different devices. Downloading a file does not prove it reached a USB drive. Browser storage can be cleared or lost.</span></div>{busy&&<div className="notice" role="status"><Busy label={busy}/></div>}{error&&<div className="notice error" role="alert">{error}</div>}{status&&<div className="notice success" role="status"><Check size={18}/>{status}</div>}<div className="backup-columns"><section className="panel backup-panel"><span className="step-number">01</span><h2>Create a backup</h2><p className="muted">All people, relationships, photographs, documents, and tree details in one portable file.</p><label className="switch-row"><span><LockKeyhole size={17}/>Protect with a passphrase</span><input type="checkbox" checked={encrypted} disabled={!!busy} onChange={e=>{setEncrypted(e.target.checked);setPrepared(null);}}/></label>{encrypted?<div className="form"><label>Backup passphrase<input type="password" autoComplete="new-password" value={password} onChange={e=>{setPassword(e.target.value);setPrepared(null);}} placeholder="At least 12 characters"/></label><label>Repeat passphrase<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>{setConfirmPassword(e.target.value);setPrepared(null);}}/></label><p className="small muted">Keep this passphrase safely. It cannot be recovered. Encryption protects this backup, not the records in this browser.</p></div>:<div className="notice warning">An ordinary ZIP is readable by anyone who has the file.</div>}<button className="button full-width" disabled={!!busy} onClick={generate}><Archive size={17}/>Prepare & validate backup</button>{prepared&&<div className="prepared-file"><Check size={20}/><strong>Ready to save</strong><span>{prepared.filename}</span><small>{formatBytes(prepared.bytes.length)} · revision {prepared.revision}{prepared.revision!==tree.revision?' · newer changes exist':''}</small>{!!(window as PickerWindow).showSaveFilePicker&&<button className="button full-width" onClick={()=>save(true)} disabled={!!busy}><FolderOpen size={16}/>Choose USB or folder</button>}<button className="button secondary full-width" onClick={()=>save(false)} disabled={!!busy}><Download size={16}/>Download file</button></div>}</section><section className="panel backup-panel"><span className="step-number">02</span><h2>Check or restore a backup</h2><p className="muted">Open a saved file to verify it, or bring a family tree onto this device. Nothing changes until you choose Restore.</p><label className="file-drop"><Upload size={26}/><strong>{file?file.name:'Choose a backup file'}</strong><span>.zip or encrypted .ftbackup</span><input aria-label="Choose backup file" type="file" accept=".zip,.ftbackup" disabled={!!busy} onChange={e=>{setFile(e.target.files?.[0]||null);setPreview(null);setStatus('');}}/></label><div className="form"><label>Passphrase, if encrypted<input type="password" autoComplete="off" value={restorePassword} onChange={e=>setRestorePassword(e.target.value)} placeholder="Leave blank for ordinary ZIP files"/></label></div><button className="button secondary full-width" disabled={!file||!!busy} onClick={inspect}><ShieldCheck size={17}/>Validate & preview</button>{preview&&<div className="restore-preview"><span className="success-text"><ShieldCheck size={16}/>All integrity checks passed</span><h3>{preview.data.tree.name}</h3><p>{preview.data.people.length} people · {preview.data.relations.length} relationships · {preview.data.media.length} files</p><p className="small muted">Created {formatTime(preview.createdAt)} · {preview.encrypted?'Encrypted':'Unencrypted'}</p><label className="checkbox"><input type="checkbox" checked={usb} onChange={e=>setUsb(e.target.checked)}/>I selected this file from my USB or other external drive.</label><button className="button secondary full-width" onClick={verify} disabled={!!busy}><Check size={16}/>Record file verification</button><hr/><label>Restore destination<select value={mode} onChange={e=>{setMode(e.target.value);setTarget({id:tree.id,revision:tree.revision});}}><option value="separate">Import as a separate family tree</option><option value="replace">Replace the current family tree</option></select></label>{mode==='replace'&&<div className="notice warning"><p>This replaces all people, relationships, and files in <strong>{tree.name}</strong>. Export your current tree first.</p><label>Type “{tree.name}” to confirm<input value={confirmName} onChange={e=>setConfirmName(e.target.value)}/></label></div>}<button className="button full-width" disabled={!!busy||(mode==='replace'&&confirmName!==tree.name)} onClick={restore}>Restore {mode==='separate'?'as a new tree':'and replace'}<ArrowRight size={16}/></button><p className="small muted">Merging is not supported. Separate import keeps both copies intact.</p></div>}</section></div><section className="panel history"><h2>Backup activity</h2>{history.length?<div className="table-scroll"><table><thead><tr><th>Created</th><th>File</th><th>Status</th><th>External copy</th></tr></thead><tbody>{history.slice(0,20).map(b=><tr key={b.id}><td>{formatTime(b.createdAt)}</td><td>{b.filename}</td><td><span className={`badge ${b.outcome==='verified'?'green':''}`}>{b.outcome==='download'?'Download requested':b.outcome==='written'?'Write completed':'File verified'}</span></td><td>{b.usbConfirmed?'Confirmed by you':'Unconfirmed'}</td></tr>)}</tbody></table></div>:<p className="muted">Your first saved backup will appear here.</p>}</section><p className="small muted">This release supports up to 100 MiB of uncompressed backup data. Another computer needs the app installed or cached before it can restore offline. Backup history describes this device and is not carried across as proof of an external copy.</p></div>;
+import { useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import {
+  Archive,
+  Download,
+  FolderOpen,
+  LockKeyhole,
+  ShieldCheck,
+  Upload,
+  Check,
+  HardDrive,
+  ArrowRight,
+} from "lucide-react";
+import { db, snapshotTree, restoreBundle } from "./db";
+import { type Tree, uid, now, friendlyError } from "./domain";
+import {
+  type ParsedBackup,
+  type PreparedBackup,
+  bytesBuffer,
+  downloadBlob,
+  sha256,
+} from "./backup";
+import { prepareBackup, inspectBackup } from "./backup-client";
+import { Busy, formatTime, formatBytes } from "./ui";
+type FileHandle = {
+  createWritable: () => Promise<{
+    write: (data: Blob) => Promise<void>;
+    close: () => Promise<void>;
+    abort: () => Promise<void>;
+  }>;
+};
+type PickerWindow = Window & {
+  showSaveFilePicker?: (options: unknown) => Promise<FileHandle>;
+};
+export function BackupCenter({
+  tree,
+  onRestored,
+  notify,
+}: {
+  tree: Tree;
+  onRestored: (tree: Tree) => void;
+  notify: (message: string) => void;
+}) {
+  const history =
+    useLiveQuery(
+      () =>
+        db.backups
+          .where("treeId")
+          .equals(tree.id)
+          .reverse()
+          .sortBy("createdAt"),
+      [tree.id],
+    ) || [];
+  const [encrypted, setEncrypted] = useState(true),
+    [password, setPassword] = useState(""),
+    [confirmPassword, setConfirmPassword] = useState(""),
+    [prepared, setPrepared] = useState<PreparedBackup | null>(null),
+    [busy, setBusy] = useState(""),
+    [error, setError] = useState(""),
+    [status, setStatus] = useState("");
+  const [file, setFile] = useState<File | null>(null),
+    [restorePassword, setRestorePassword] = useState(""),
+    [preview, setPreview] = useState<ParsedBackup | null>(null),
+    [fileHash, setFileHash] = useState(""),
+    [mode, setMode] = useState("separate"),
+    [target, setTarget] = useState({ id: tree.id, revision: tree.revision }),
+    [confirmName, setConfirmName] = useState(""),
+    [usb, setUsb] = useState(false);
+  const latestVerified = history.find((b) => b.outcome === "verified"),
+    latestSaved = history.find(
+      (b) => b.outcome === "written" || b.outcome === "verified",
+    );
+  async function generate() {
+    setBusy("Preparing and checking your backup…");
+    setError("");
+    setStatus("");
+    setPrepared(null);
+    try {
+      if (encrypted && password !== confirmPassword)
+        throw new Error("The two passphrases do not match.");
+      if (encrypted && password.length < 12)
+        throw new Error("Use a passphrase with at least 12 characters.");
+      const result = await prepareBackup(
+        await snapshotTree(tree.id),
+        encrypted ? password : "",
+      );
+      setPrepared(result);
+      setPassword("");
+      setConfirmPassword("");
+      setStatus(
+        "Backup generated and validated. Choose where to save it below.",
+      );
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy("");
+    }
+  }
+  async function logSave(outcome: "download" | "written") {
+    if (!prepared) return;
+    await db.backups.add({
+      id: uid(),
+      treeId: tree.id,
+      backupId: prepared.backupId,
+      revision: prepared.revision,
+      createdAt: prepared.createdAt,
+      filename: prepared.filename,
+      outcome,
+      usbConfirmed: false,
+      fileHash: await sha256(prepared.bytes),
+    });
+  }
+  async function save(direct: boolean) {
+    if (!prepared) return;
+    setError("");
+    try {
+      const blob = new Blob([bytesBuffer(prepared.bytes)], {
+        type: prepared.filename.endsWith(".zip")
+          ? "application/zip"
+          : "application/octet-stream",
+      });
+      if (direct && (window as PickerWindow).showSaveFilePicker) {
+        const handle = await (window as PickerWindow).showSaveFilePicker!({
+          suggestedName: prepared.filename,
+        });
+        setBusy("Writing the selected file…");
+        const writable = await handle.createWritable();
+        try {
+          await writable.write(blob);
+          await writable.close();
+        } catch (e) {
+          try {
+            await writable.abort();
+          } catch {}
+          throw e;
+        }
+        await logSave("written");
+        setStatus(
+          "File write completed. Reopen the saved file below to check its integrity.",
+        );
+      } else {
+        downloadBlob(blob, prepared.filename);
+        await logSave("download");
+        setStatus(
+          "Download requested. Check that it finished, copy it to your USB, then reopen that file below.",
+        );
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError")
+        setStatus("Saving cancelled. No successful save was recorded.");
+      else setError(friendlyError(e));
+    } finally {
+      setBusy("");
+    }
+  }
+  async function inspect() {
+    if (!file) return;
+    setBusy("Opening and validating every record and attachment…");
+    setError("");
+    setPreview(null);
+    try {
+      if (file.size > 104 * 1024 * 1024)
+        throw new Error(
+          "This backup is too large (maximum 104 MiB file size).",
+        );
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const parsed = await inspectBackup(bytes, restorePassword);
+      setFileHash(await sha256(bytes));
+      setPreview(parsed);
+      setRestorePassword("");
+      setTarget({ id: tree.id, revision: tree.revision });
+      setMode("separate");
+      setConfirmName("");
+      setUsb(false);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy("");
+    }
+  }
+  async function verify() {
+    if (!preview) return;
+    setBusy("Recording verification…");
+    setError("");
+    try {
+      const records = await db.backups
+        .where("treeId")
+        .equals(tree.id)
+        .filter((b) => b.backupId === preview.backupId)
+        .toArray();
+      const matching = records.filter((b) => b.fileHash === fileHash);
+      if (!matching.length) {
+        setStatus(
+          "This file passed integrity checks. It was not previously exported from this tree on this device, so its backup history was not changed.",
+        );
+        return;
+      }
+      await db.transaction("rw", db.backups, async () => {
+        for (const b of matching)
+          await db.backups.update(b.id, {
+            outcome: "verified",
+            verifiedAt: now(),
+            usbConfirmed: usb,
+          });
+      });
+      setStatus(
+        usb
+          ? "Saved file verified; USB location confirmed by you."
+          : "Saved file verified. External storage location has not been confirmed.",
+      );
+      notify("Backup integrity verified");
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy("");
+    }
+  }
+  async function restore() {
+    if (!preview) return;
+    setError("");
+    setBusy("Restoring family records…");
+    try {
+      if (mode === "replace" && confirmName !== tree.name)
+        throw new Error(
+          "Type the current tree name exactly to confirm replacement.",
+        );
+      const restored = await restoreBundle(
+        preview,
+        mode === "replace" ? target : undefined,
+      );
+      onRestored(restored);
+      setPreview(null);
+      setPrepared(null);
+      notify(
+        `Restored ${preview.data.people.length} people and ${preview.data.media.length} files`,
+      );
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <div className="backup-page">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">KEEP YOUR STORIES SAFE</span>
+          <h1>A little care. A lasting legacy.</h1>
+          <p>
+            Your browser holds the working copy. A backup gives your family
+            another home.
+          </p>
+        </div>
+        <span className="intro-icon">
+          <Archive size={32} />
+        </span>
+      </div>
+      <div className="backup-stats">
+        <div>
+          <ShieldCheck size={20} />
+          <span>
+            <small>Last verified file</small>
+            <strong>{formatTime(latestVerified?.verifiedAt)}</strong>
+          </span>
+        </div>
+        <div>
+          <HardDrive size={20} />
+          <span>
+            <small>Last saved snapshot</small>
+            <strong>{formatTime(latestSaved?.createdAt)}</strong>
+          </span>
+        </div>
+        <div>
+          <Archive size={20} />
+          <span>
+            <small>Changes since verified backup</small>
+            <strong>
+              {latestVerified
+                ? Math.max(0, tree.revision - latestVerified.revision)
+                : "No verified backup yet"}
+            </strong>
+          </span>
+        </div>
+      </div>
+      <div className="notice">
+        <ShieldCheck size={18} />
+        <span>
+          Keep two copies on different devices. Downloading a file does not
+          prove it reached a USB drive. Browser storage can be cleared or lost.
+        </span>
+      </div>
+      {busy && (
+        <div className="notice" role="status">
+          <Busy label={busy} />
+        </div>
+      )}
+      {error && (
+        <div className="notice error" role="alert">
+          {error}
+        </div>
+      )}
+      {status && (
+        <div className="notice success" role="status">
+          <Check size={18} />
+          {status}
+        </div>
+      )}
+      <div className="backup-columns">
+        <section className="panel backup-panel">
+          <span className="step-number">01</span>
+          <h2>Create a backup</h2>
+          <p className="muted">
+            All people, relationships, photographs, documents, and tree details
+            in one portable file.
+          </p>
+          <label className="switch-row">
+            <span>
+              <LockKeyhole size={17} />
+              Protect with a passphrase
+            </span>
+            <input
+              type="checkbox"
+              checked={encrypted}
+              disabled={!!busy}
+              onChange={(e) => {
+                setEncrypted(e.target.checked);
+                setPrepared(null);
+              }}
+            />
+          </label>
+          {encrypted ? (
+            <div className="form">
+              <label>
+                Backup passphrase
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPrepared(null);
+                  }}
+                  placeholder="At least 12 characters"
+                />
+              </label>
+              <label>
+                Repeat passphrase
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value);
+                    setPrepared(null);
+                  }}
+                />
+              </label>
+              <p className="small muted">
+                Keep this passphrase safely. It cannot be recovered. Encryption
+                protects this backup, not the records in this browser.
+              </p>
+            </div>
+          ) : (
+            <div className="notice warning">
+              An ordinary ZIP is readable by anyone who has the file.
+            </div>
+          )}
+          <button
+            className="button full-width"
+            disabled={!!busy}
+            onClick={generate}
+          >
+            <Archive size={17} />
+            Prepare & validate backup
+          </button>
+          {prepared && (
+            <div className="prepared-file">
+              <Check size={20} />
+              <strong>Ready to save</strong>
+              <span>{prepared.filename}</span>
+              <small>
+                {formatBytes(prepared.bytes.length)} · revision{" "}
+                {prepared.revision}
+                {prepared.revision !== tree.revision
+                  ? " · newer changes exist"
+                  : ""}
+              </small>
+              {!!(window as PickerWindow).showSaveFilePicker && (
+                <button
+                  className="button full-width"
+                  onClick={() => save(true)}
+                  disabled={!!busy}
+                >
+                  <FolderOpen size={16} />
+                  Choose USB or folder
+                </button>
+              )}
+              <button
+                className="button secondary full-width"
+                onClick={() => save(false)}
+                disabled={!!busy}
+              >
+                <Download size={16} />
+                Download file
+              </button>
+            </div>
+          )}
+        </section>
+        <section className="panel backup-panel">
+          <span className="step-number">02</span>
+          <h2>Check or restore a backup</h2>
+          <p className="muted">
+            Open a saved file to verify it, or bring a family tree onto this
+            device. Nothing changes until you choose Restore.
+          </p>
+          <label className="file-drop">
+            <Upload size={26} />
+            <strong>{file ? file.name : "Choose a backup file"}</strong>
+            <span>.zip or encrypted .ftbackup</span>
+            <input
+              aria-label="Choose backup file"
+              type="file"
+              accept=".zip,.ftbackup"
+              disabled={!!busy}
+              onChange={(e) => {
+                setFile(e.target.files?.[0] || null);
+                setPreview(null);
+                setStatus("");
+              }}
+            />
+          </label>
+          <div className="form">
+            <label>
+              Passphrase, if encrypted
+              <input
+                type="password"
+                autoComplete="off"
+                value={restorePassword}
+                onChange={(e) => setRestorePassword(e.target.value)}
+                placeholder="Leave blank for ordinary ZIP files"
+              />
+            </label>
+          </div>
+          <button
+            className="button secondary full-width"
+            disabled={!file || !!busy}
+            onClick={inspect}
+          >
+            <ShieldCheck size={17} />
+            Validate & preview
+          </button>
+          {preview && (
+            <div className="restore-preview">
+              <span className="success-text">
+                <ShieldCheck size={16} />
+                All integrity checks passed
+              </span>
+              <h3>{preview.data.tree.name}</h3>
+              <p>
+                {preview.data.people.length} people ·{" "}
+                {preview.data.relations.length} relationships ·{" "}
+                {preview.data.media.length} files
+              </p>
+              <p className="small muted">
+                Created {formatTime(preview.createdAt)} ·{" "}
+                {preview.encrypted ? "Encrypted" : "Unencrypted"}
+              </p>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={usb}
+                  onChange={(e) => setUsb(e.target.checked)}
+                />
+                I selected this file from my USB or other external drive.
+              </label>
+              <button
+                className="button secondary full-width"
+                onClick={verify}
+                disabled={!!busy}
+              >
+                <Check size={16} />
+                Record file verification
+              </button>
+              <hr />
+              <label>
+                Restore destination
+                <select
+                  value={mode}
+                  onChange={(e) => {
+                    setMode(e.target.value);
+                    setTarget({ id: tree.id, revision: tree.revision });
+                  }}
+                >
+                  <option value="separate">
+                    Import as a separate family tree
+                  </option>
+                  <option value="replace">
+                    Replace the current family tree
+                  </option>
+                </select>
+              </label>
+              {mode === "replace" && (
+                <div className="notice warning">
+                  <p>
+                    This replaces all people, relationships, and files in{" "}
+                    <strong>{tree.name}</strong>. Export your current tree
+                    first.
+                  </p>
+                  <label>
+                    Type “{tree.name}” to confirm
+                    <input
+                      value={confirmName}
+                      onChange={(e) => setConfirmName(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
+              <button
+                className="button full-width"
+                disabled={
+                  !!busy || (mode === "replace" && confirmName !== tree.name)
+                }
+                onClick={restore}
+              >
+                Restore {mode === "separate" ? "as a new tree" : "and replace"}
+                <ArrowRight size={16} />
+              </button>
+              <p className="small muted">
+                Merging is not supported. Separate import keeps both copies
+                intact.
+              </p>
+            </div>
+          )}
+        </section>
+      </div>
+      <section className="panel history">
+        <h2>Backup activity</h2>
+        {history.length ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Created</th>
+                  <th>File</th>
+                  <th>Status</th>
+                  <th>External copy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.slice(0, 20).map((b) => (
+                  <tr key={b.id}>
+                    <td>{formatTime(b.createdAt)}</td>
+                    <td>{b.filename}</td>
+                    <td>
+                      <span
+                        className={`badge ${b.outcome === "verified" ? "green" : ""}`}
+                      >
+                        {b.outcome === "download"
+                          ? "Download requested"
+                          : b.outcome === "written"
+                            ? "Write completed"
+                            : "File verified"}
+                      </span>
+                    </td>
+                    <td>
+                      {b.usbConfirmed ? "Confirmed by you" : "Unconfirmed"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="muted">Your first saved backup will appear here.</p>
+        )}
+      </section>
+      <p className="small muted">
+        This release supports up to 100 MiB of uncompressed backup data. Another
+        computer needs the app installed or cached before it can restore
+        offline. Backup history describes this device and is not carried across
+        as proof of an external copy.
+      </p>
+    </div>
+  );
 }

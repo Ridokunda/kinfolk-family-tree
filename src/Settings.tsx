@@ -1,12 +1,204 @@
-import { useEffect,useState } from 'react';
-import { HardDrive,ShieldCheck,Download,WifiOff,LockKeyhole } from 'lucide-react';
-import { db } from './db';
-import { type Tree,friendlyError,treeSchema,now } from './domain';
-import { formatBytes } from './ui';
-export function Settings({tree,install,onBackup,notify}:{tree:Tree;install:()=>void;onBackup:()=>void;notify:(s:string)=>void}){
- const [persistent,setPersistent]=useState<boolean|null>(null),[usage,setUsage]=useState<StorageEstimate|null>(null),[name,setName]=useState(tree.name),[description,setDescription]=useState(tree.description),[error,setError]=useState('');
- useEffect(()=>{navigator.storage?.persisted?.().then(setPersistent).catch(()=>{});navigator.storage?.estimate?.().then(setUsage).catch(()=>{});},[]);
- async function request(){try{if(!navigator.storage?.persist)throw new Error('This browser does not support requesting persistent storage. Keep external backups.');const granted=await navigator.storage.persist();setPersistent(granted);notify(granted?'Persistent storage granted. External backups are still essential.':'The browser did not grant persistence. Keep regular backups.');}catch(e){setError(friendlyError(e));}}
- async function rename(){try{const parsed=treeSchema.parse({...tree,name,description});await db.transaction('rw',db.trees,async()=>{const current=await db.trees.get(tree.id);if(!current)throw new Error('Tree no longer exists.');await db.trees.update(tree.id,{name:parsed.name,description:parsed.description,revision:current.revision+1,updatedAt:now()});});notify('Family tree details saved');}catch(e){setError(friendlyError(e));}}
- return <div className="settings-page"><div className="page-intro"><div><span className="eyebrow">YOUR ARCHIVE, YOUR WAY</span><h1>A safe place for family.</h1><p>Understand where your stories live and how to keep them.</p></div></div>{error&&<div className="notice error" role="alert">{error}</div>}<div className="settings-grid"><section className="panel"><h2>Family tree details</h2><div className="form"><label>Tree name<input value={name} onChange={e=>setName(e.target.value)} maxLength={120}/></label><label>Description<textarea rows={3} value={description} onChange={e=>setDescription(e.target.value)}/></label><button className="button" onClick={rename}>Save tree details</button></div></section><section className="panel"><HardDrive size={24}/><h2>Storage on this device</h2><p>Records and files live in this browser’s IndexedDB database. They are separate from the downloaded application.</p><div className="storage-meter"><span style={{width:`${usage?.quota?Math.min(100,(usage.usage||0)/usage.quota*100):0}%`}}/></div><p className="small muted">{usage?.quota?`${formatBytes(usage.usage||0)} used of approximately ${formatBytes(usage.quota)} available to this site`:'Storage estimates are unavailable in this browser.'}</p><p className="badge">{persistent===null?'Persistence status unavailable':persistent?'Persistent storage granted':'Best-effort browser storage'}</p><button className="button secondary" onClick={request}><ShieldCheck size={16}/>Request persistent storage</button></section><section className="panel"><WifiOff size={24}/><h2>Take your family tree offline</h2><p>Once the app says “Offline ready,” you can reopen it, edit people, explore the tree, and back up without internet. Installation options depend on your browser.</p><button className="button secondary" onClick={install}><Download size={16}/>Install app</button><p className="small muted">First download and application updates need internet. A fresh computer must load the app before restoring offline.</p></section><section className="panel"><LockKeyhole size={24}/><h2>Private by design</h2><p>Family data stays on this device. No analytics, cloud accounts, remote photographs, or data synchronization.</p><p>Anyone using the same unlocked browser profile can read the local database. Use separate device accounts and a screen lock. Encrypted backups protect exported files only.</p><button className="button secondary" onClick={onBackup}>Manage backups</button></section></div><div className="notice warning"><strong>Local storage is not a backup.</strong><span>Clearing site data, private browsing, a lost device, or changing browser profiles can leave you without your records. A different website address also has separate storage. Keep two independent backup copies.</span></div><section className="panel"><h2>About this release</h2><p>Kinfolk 1.0 · Local database version 2 · Backup format 1</p><p className="muted">Up to 10,000 people, 50,000 relationships, and 100 MiB of uncompressed backup content. These are import safety limits, not a guarantee that every device can display all records at once. Use focused views for large families. Merging, shared editing, GEDCOM, and cloud sync are not included.</p></section></div>;
+import { useEffect, useState } from "react";
+import {
+  HardDrive,
+  ShieldCheck,
+  Download,
+  WifiOff,
+  LockKeyhole,
+} from "lucide-react";
+import { db, assertBackupCapacity } from "./db";
+import { type Tree, friendlyError, treeSchema, now } from "./domain";
+import { formatBytes } from "./ui";
+export function Settings({
+  tree,
+  install,
+  onBackup,
+  notify,
+}: {
+  tree: Tree;
+  install: () => void;
+  onBackup: () => void;
+  notify: (s: string) => void;
+}) {
+  const [persistent, setPersistent] = useState<boolean | null>(null),
+    [usage, setUsage] = useState<StorageEstimate | null>(null),
+    [name, setName] = useState(tree.name),
+    [description, setDescription] = useState(tree.description),
+    [error, setError] = useState("");
+  useEffect(() => {
+    navigator.storage
+      ?.persisted?.()
+      .then(setPersistent)
+      .catch(() => {});
+    navigator.storage
+      ?.estimate?.()
+      .then(setUsage)
+      .catch(() => {});
+  }, []);
+  async function request() {
+    try {
+      if (!navigator.storage?.persist)
+        throw new Error(
+          "This browser does not support requesting persistent storage. Keep external backups.",
+        );
+      const granted = await navigator.storage.persist();
+      setPersistent(granted);
+      notify(
+        granted
+          ? "Persistent storage granted. External backups are still essential."
+          : "The browser did not grant persistence. Keep regular backups.",
+      );
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+  }
+  async function rename() {
+    try {
+      const parsed = treeSchema.parse({ ...tree, name, description });
+      await db.transaction(
+        "rw",
+        [db.trees, db.people, db.relations, db.media],
+        async () => {
+          const current = await db.trees.get(tree.id);
+          if (!current) throw new Error("Tree no longer exists.");
+          await db.trees.update(tree.id, {
+            name: parsed.name,
+            description: parsed.description,
+            revision: current.revision + 1,
+            updatedAt: now(),
+          });
+          await assertBackupCapacity(tree.id);
+        },
+      );
+      notify("Family tree details saved");
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+  }
+  return (
+    <div className="settings-page">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">YOUR ARCHIVE, YOUR WAY</span>
+          <h1>A safe place for family.</h1>
+          <p>Understand where your stories live and how to keep them.</p>
+        </div>
+      </div>
+      {error && (
+        <div className="notice error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="settings-grid">
+        <section className="panel">
+          <h2>Family tree details</h2>
+          <div className="form">
+            <label>
+              Tree name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={120}
+              />
+            </label>
+            <label>
+              Description
+              <textarea
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </label>
+            <button className="button" onClick={rename}>
+              Save tree details
+            </button>
+          </div>
+        </section>
+        <section className="panel">
+          <HardDrive size={24} />
+          <h2>Storage on this device</h2>
+          <p>
+            Records and files live in this browser’s IndexedDB database. They
+            are separate from the downloaded application.
+          </p>
+          <div className="storage-meter">
+            <span
+              style={{
+                width: `${usage?.quota ? Math.min(100, ((usage.usage || 0) / usage.quota) * 100) : 0}%`,
+              }}
+            />
+          </div>
+          <p className="small muted">
+            {usage?.quota
+              ? `${formatBytes(usage.usage || 0)} used of approximately ${formatBytes(usage.quota)} available to this site`
+              : "Storage estimates are unavailable in this browser."}
+          </p>
+          <p className="badge">
+            {persistent === null
+              ? "Persistence status unavailable"
+              : persistent
+                ? "Persistent storage granted"
+                : "Best-effort browser storage"}
+          </p>
+          <button className="button secondary" onClick={request}>
+            <ShieldCheck size={16} />
+            Request persistent storage
+          </button>
+        </section>
+        <section className="panel">
+          <WifiOff size={24} />
+          <h2>Take your family tree offline</h2>
+          <p>
+            Once the app says “Offline ready,” you can reopen it, edit people,
+            explore the tree, and back up without internet. Installation options
+            depend on your browser.
+          </p>
+          <button className="button secondary" onClick={install}>
+            <Download size={16} />
+            Install app
+          </button>
+          <p className="small muted">
+            First download and application updates need internet. A fresh
+            computer must load the app before restoring offline.
+          </p>
+        </section>
+        <section className="panel">
+          <LockKeyhole size={24} />
+          <h2>Private by design</h2>
+          <p>
+            Family data stays on this device. No analytics, cloud accounts,
+            remote photographs, or data synchronization.
+          </p>
+          <p>
+            Anyone using the same unlocked browser profile can read the local
+            database. Use separate device accounts and a screen lock. Encrypted
+            backups protect exported files only.
+          </p>
+          <button className="button secondary" onClick={onBackup}>
+            Manage backups
+          </button>
+        </section>
+      </div>
+      <div className="notice warning">
+        <strong>Local storage is not a backup.</strong>
+        <span>
+          Clearing site data, private browsing, a lost device, or changing
+          browser profiles can leave you without your records. A different
+          website address also has separate storage. Keep two independent backup
+          copies.
+        </span>
+      </div>
+      <section className="panel">
+        <h2>About this release</h2>
+        <p>Kinfolk 1.0 · Local database version 2 · Backup format 1</p>
+        <p className="muted">
+          Up to 10,000 people, 50,000 relationships, and 100 MiB of uncompressed
+          backup content. These are import safety limits, not a guarantee that
+          every device can display all records at once. Use focused views for
+          large families. Merging, shared editing, GEDCOM, and cloud sync are
+          not included.
+        </p>
+      </section>
+    </div>
+  );
 }
