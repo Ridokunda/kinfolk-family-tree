@@ -150,6 +150,65 @@ describe("family graph rules", () => {
   });
 });
 describe("transactional storage", () => {
+  it("saves a child with two independently typed parent relationships in one change", async () => {
+    const tree = await createTree("Two parents");
+    const a = await savePerson({
+      ...blankPerson(tree.id),
+      givenName: "First parent",
+    });
+    const b = await savePerson({
+      ...blankPerson(tree.id),
+      givenName: "Other parent",
+    });
+    const before = (await db.trees.get(tree.id))!.revision;
+    const child = blankPerson(tree.id);
+    await savePerson(child, [edge(a, child), edge(b, child, "adoptive")]);
+    const links = await db.relations.where("toId").equals(child.id).toArray();
+    expect(links.map((r) => [r.fromId, r.kind])).toEqual(
+      expect.arrayContaining([
+        [a.id, "biological"],
+        [b.id, "adoptive"],
+      ]),
+    );
+    expect(links).toHaveLength(2);
+    expect((await db.trees.get(tree.id))!.revision).toBe(before + 1);
+    expect(await db.people.count()).toBe(3);
+  });
+  it("leaves no child or first-parent link when the other parent is missing", async () => {
+    const tree = await createTree("Missing parent");
+    const parent = await savePerson(blankPerson(tree.id));
+    const child = blankPerson(tree.id),
+      missing = blankPerson(tree.id);
+    const before = (await db.trees.get(tree.id))!.revision;
+    await expect(
+      savePerson(child, [edge(parent, child), edge(missing, child)]),
+    ).rejects.toThrow(/missing/);
+    expect(await db.people.get(child.id)).toBeUndefined();
+    expect(await db.relations.count()).toBe(0);
+    expect((await db.trees.get(tree.id))!.revision).toBe(before);
+  });
+  it("rolls back both parent links and the child if writing the second link fails", async () => {
+    const tree = await createTree("Write rollback");
+    const a = await savePerson(blankPerson(tree.id)),
+      b = await savePerson(blankPerson(tree.id));
+    const child = blankPerson(tree.id),
+      before = (await db.trees.get(tree.id))!.revision;
+    const fail = (_key: unknown, r: Relation) => {
+      if (r.fromId === b.id)
+        throw new Error("Simulated second-link write failure");
+    };
+    db.relations.hook("creating", fail);
+    try {
+      await expect(
+        savePerson(child, [edge(a, child), edge(b, child)]),
+      ).rejects.toThrow(/second-link/);
+    } finally {
+      db.relations.hook("creating").unsubscribe(fail);
+    }
+    expect(await db.people.get(child.id)).toBeUndefined();
+    expect(await db.relations.count()).toBe(0);
+    expect((await db.trees.get(tree.id))!.revision).toBe(before);
+  });
   it("persists a person across closing and reopening the database", async () => {
     const t = await createTree("Test family");
     const p = await savePerson({ ...blankPerson(t.id), givenName: "Thandi" });

@@ -104,7 +104,13 @@ export async function assertBackupCapacity(treeId: string) {
       "This change would exceed the 100 MiB backup limit. Use a smaller attachment or keep a separate archive. Your change was not saved.",
     );
 }
-export async function savePerson(input: Person, newRelation?: Relation) {
+export async function savePerson(
+  input: Person,
+  newRelations: Relation | Relation[] = [],
+) {
+  const links = (
+    Array.isArray(newRelations) ? newRelations : [newRelations]
+  ).map((r) => relationSchema.parse(r));
   const p = personSchema.parse({
     ...input,
     givenName: input.givenName.trim(),
@@ -128,8 +134,7 @@ export async function savePerson(input: Person, newRelation?: Relation) {
       }
       await bump(p.treeId);
       await db.people.put(p);
-      if (newRelation) {
-        const r = relationSchema.parse(newRelation);
+      if (links.length) {
         const people = await db.people
           .where("treeId")
           .equals(p.treeId)
@@ -138,8 +143,8 @@ export async function savePerson(input: Person, newRelation?: Relation) {
           .where("treeId")
           .equals(p.treeId)
           .toArray();
-        validateGraph(people, [...relations, r], p.treeId);
-        await db.relations.add(r);
+        validateGraph(people, [...relations, ...links], p.treeId);
+        await db.relations.bulkAdd(links);
       }
       await assertBackupCapacity(p.treeId);
     },

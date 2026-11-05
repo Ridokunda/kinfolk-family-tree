@@ -287,3 +287,95 @@ test("add a relative from the tree and export PNG and printable PDF view", async
   await expect(popup.locator("img")).toBeVisible();
   await popup.close();
 });
+
+test("add a child with both parents from the tree and profile", async ({
+  page,
+}) => {
+  await sample(page);
+  await page
+    .getByRole("button", { name: "Add relative to James Willow", exact: true })
+    .click();
+  const other = page.getByRole("combobox", {
+    name: "Other parent (optional)",
+    exact: true,
+  });
+  await expect(other).toHaveValue("");
+  await expect(
+    other.locator("option").filter({ hasText: "James Willow" }),
+  ).toHaveCount(0);
+  await other.selectOption({ label: "Clara Reed · 1971" });
+  await page
+    .getByRole("combobox", { name: "Other parent’s relationship", exact: true })
+    .selectOption("adoptive");
+  await page
+    .getByRole("combobox", { name: "Direction", exact: true })
+    .selectOption("parent");
+  await expect(other).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "Direction", exact: true })
+    .selectOption("child");
+  await expect(other).not.toHaveValue("");
+  await page
+    .getByRole("combobox", { name: "Relationship type", exact: true })
+    .selectOption("partner");
+  await expect(other).toHaveCount(0);
+  await page
+    .getByRole("combobox", { name: "Relationship type", exact: true })
+    .selectOption("biological");
+  await page.getByLabel("Given names").fill("Two-parent child");
+  await page
+    .getByRole("button", { name: "Add family member", exact: true })
+    .click();
+  const profile = page.locator(".profile-panel");
+  await expect(
+    profile.getByRole("heading", { name: "Two-parent child", exact: true }),
+  ).toBeVisible();
+  await expect(
+    profile.getByRole("button", {
+      name: "Biological parent · James Willow",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    profile.getByRole("button", {
+      name: "Adoptive parent · Clara Reed",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.reload();
+  await page.getByLabel("Search family members").fill("Two-parent child");
+  await page.locator(".search-results").getByRole("button").click();
+  await expect(
+    profile.getByRole("button", {
+      name: "Biological parent · James Willow",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    profile.getByRole("button", {
+      name: "Adoptive parent · Clara Reed",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await profile
+    .locator(".relative-list")
+    .getByRole("button")
+    .filter({ hasText: "James Willow" })
+    .click();
+  await profile.getByRole("button", { name: "Relative", exact: true }).click();
+  await expect(other).toHaveValue("");
+  await page.getByLabel("Given names").fill("One-parent child");
+  await page
+    .getByRole("button", { name: "Add family member", exact: true })
+    .click();
+  await expect(
+    profile.getByRole("heading", { name: "One-parent child", exact: true }),
+  ).toBeVisible();
+  await expect(profile.locator(".connection")).toHaveCount(1);
+  await expect(
+    profile.getByRole("button", {
+      name: "Biological parent · James Willow",
+      exact: true,
+    }),
+  ).toBeVisible();
+});

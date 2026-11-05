@@ -5,8 +5,8 @@ Automated tests use fictional records only. Test results and screenshots are kep
 ## Completed on 5 November 2026
 
 - Production TypeScript/Vite build and offline precache generation passed.
-- 38 unit/integration tests passed, including encrypted/corrupt backup cases, schema migration, stale edits, and atomic recovery after simulated write failure.
-- Five Chromium browser workflows passed: desktop/mobile navigation, profile persistence with attachments, encrypted backup verification and fresh-context recovery with photos, offline reopen/edit/export, and adding relatives with PNG/print export.
+- 41 unit/integration tests passed, including encrypted/corrupt backup cases, schema migration, stale edits, atomic recovery after simulated write failure, and saving both parent links with a child in one transaction.
+- Six Chromium browser workflows passed: desktop/mobile navigation, profile persistence with attachments, encrypted backup verification and fresh-context recovery with photos, offline reopen/edit/export, adding relatives with PNG/print export, and optional second-parent selection with reload persistence.
 - The exported PNG was checked for nonblank content and visually inspected. Desktop and mobile screenshots were also inspected.
 - Production dependency audit reported zero known vulnerabilities at the time of the check. This is not an independent security audit.
 

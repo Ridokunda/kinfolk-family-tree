@@ -12,6 +12,7 @@ import {
 } from "./domain";
 import { savePerson, saveRelation } from "./db";
 import { Modal, Busy } from "./ui";
+const parentKinds: Relation["kind"][] = ["biological", "adoptive", "parent"];
 export function PersonEditor({
   person,
   people,
@@ -28,11 +29,24 @@ export function PersonEditor({
   const [form, setForm] = useState(person),
     [kind, setKind] = useState<Relation["kind"]>("biological"),
     [direction, setDirection] = useState("child"),
+    [otherParentId, setOtherParentId] = useState(""),
+    [otherParentKind, setOtherParentKind] =
+      useState<Relation["kind"]>("biological"),
     [allowDuplicate, setAllowDuplicate] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const existing = people.some((p) => p.id === person.id),
     duplicates = duplicatePeople(form, people);
+  const addingChild =
+    !!relative && direction === "child" && parentKinds.includes(kind);
+  const availableParents = people
+    .filter(
+      (p) =>
+        p.treeId === person.treeId &&
+        p.id !== relative?.id &&
+        p.id !== person.id,
+    )
+    .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
   const change = (key: keyof Person, value: unknown) =>
     setForm((p) => ({ ...p, [key]: value }));
   async function submit(e: FormEvent) {
@@ -58,7 +72,21 @@ export function PersonEditor({
             createdAt: now(),
           }
         : undefined;
-      const p = await savePerson(form, relation);
+      const newRelations = relation ? [relation] : [];
+      if (addingChild && otherParentId) {
+        if (!availableParents.some((p) => p.id === otherParentId))
+          throw new Error(
+            "The other parent is no longer available. Choose another family member or leave it unknown.",
+          );
+        newRelations.push({
+          ...relation!,
+          id: uid(),
+          fromId: otherParentId,
+          toId: person.id,
+          kind: otherParentKind,
+        });
+      }
+      const p = await savePerson(form, newRelations);
       onSaved(p);
     } catch (e) {
       setError(friendlyError(e));
@@ -227,6 +255,49 @@ export function PersonEditor({
                 </label>
               )}
             </div>
+            {addingChild && (
+              <div className="form-grid" style={{ marginTop: 16 }}>
+                <label>
+                  Other parent (optional)
+                  <select
+                    value={otherParentId}
+                    onChange={(e) => setOtherParentId(e.target.value)}
+                  >
+                    <option value="">Unknown / add later</option>
+                    {availableParents.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {nameOf(p)}
+                        {p.birthDate ? ` · ${p.birthDate}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {otherParentId && (
+                  <label>
+                    Other parent’s relationship
+                    <select
+                      value={otherParentKind}
+                      onChange={(e) =>
+                        setOtherParentKind(e.target.value as Relation["kind"])
+                      }
+                    >
+                      {parentKinds.map((k) => (
+                        <option key={k} value={k}>
+                          {kindLabel[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <p
+                  className="small muted"
+                  style={{ gridColumn: "1 / -1", marginBottom: 0 }}
+                >
+                  {nameOf(relative)} will be linked as a parent. Select the
+                  other parent if known.
+                </p>
+              </div>
+            )}
           </fieldset>
         )}
         {duplicates.length > 0 && (

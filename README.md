@@ -24,6 +24,7 @@ Open the printed address. Wait for the service worker to finish installing befor
 
 - Multiple separate family trees, plus an explicitly fictional sample.
 - People, photographs, biographies, notes, gender, living status, birthplace, partial and approximate dates.
+- When adding a child from a person card or profile, optionally select the other parent from the current family tree. Each parent can have biological, adoptive, or unspecified parentage; the child and both links save together.
 - Biological/adoptive/unspecified parentage, marriages, partnerships, divorce, stepparents, and guardianship.
 - Relationship editing, duplicate detection, transactional cycle prevention, and derived relatives. Unknown parentage is not treated as proof of a half-sibling relationship.
 - Automatic graph layout in a worker, focused ancestor/descendant/extended views, collapsed branches, search, zoom/pan, profile selection, and adding relatives from a person card.
